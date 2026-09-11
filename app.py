@@ -74,8 +74,6 @@ st.markdown("""
         color: #FFFFFF !important;
         -webkit-text-fill-color: #FFFFFF !important;
     }
-    /* Streamlit omits the chevron when the label is exactly :material/menu:.
-       Add only the text label; no descendant icons or spans are hidden. */
     [data-testid="stPopoverButton"][aria-label=":material/menu:"]::after {
         content: "Menu";
         position: absolute;
@@ -198,10 +196,13 @@ def extract_llm_text(content):
 
     return str(content)
 
+@st.cache_resource
+def get_vector_store():
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    return Chroma(embedding_function=embeddings)
 
 if "vector_store" not in st.session_state:
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    st.session_state.vector_store = Chroma(embedding_function=embeddings)
+    st.session_state.vector_store = get_vector_store()
 if "processed_files" not in st.session_state:
     st.session_state.processed_files = set()
 if "messages" not in st.session_state:

@@ -1,0 +1,10 @@
+streamlit
+PyMuPDF
+langchain-text-splitters
+langchain-google-genai
+langchain-community
+chromadb
+sentence-transformers
+google-generativeai
+moviepy
+python-dotenv

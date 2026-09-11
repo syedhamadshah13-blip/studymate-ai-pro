@@ -1,0 +1,15 @@
+[theme]
+# Deep Professional Blue for buttons and highlights
+primaryColor = "#1E3A8A"
+
+# Clean White background for the main chat area
+backgroundColor = "#FFFFFF"
+
+# Light Gray for the sidebar so it stands out smoothly
+secondaryBackgroundColor = "#F0F2F6"
+
+# Dark Slate for highly readable professional text
+textColor = "#0F172A"
+
+# Modern, clean font
+font = "sans serif"

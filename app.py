@@ -232,7 +232,6 @@ if st.session_state.nav_override:
     st.session_state.nav_override = None
 
 # Keep the menu radio in sync with navigation buttons such as Home and Make Exam.
-# This runs before the radio widget is created, so it never mutates a live widget.
 if st.session_state.get("popover_nav_radio") != st.session_state.nav_page:
     st.session_state.popover_nav_radio = st.session_state.nav_page
 
@@ -281,70 +280,26 @@ wrap valid LaTex in $...$ so equations render correctly."""
    C) Random sampling  
    D) Manual indexing only
 
-2. Which component is used for similarity search in the study workspace? **(2 marks)**  
-   A) ChromaDB  
-   B) A spreadsheet  
-   C) A web browser  
-   D) A cache folder
-
-3. What is the purpose of document chunking? **(2 marks)**  
-   A) To delete the source file  
-   B) To prepare text for efficient retrieval  
-   C) To create an API key  
-   D) To record audio
-
-4. Which model capability produces answers based on retrieved notes? **(2 marks)**  
-   A) Text generation  
-   B) Video compression  
-   C) File renaming  
-   D) Browser navigation
-
-5. Why should an answer be grounded in study notes? **(2 marks)**  
-   A) To improve relevance and accuracy  
-   B) To make it longer  
-   C) To avoid all questions  
-   D) To remove context
-
-## Section B — Short Answer Questions (10 marks)
-
-6. Explain how retrieved context improves an AI study answer. **(5 marks)**
-
-____________________________________________________________________________
-
-____________________________________________________________________________
-
-7. Describe the steps that take an uploaded document from processing to a searchable answer. **(5 marks)**
-
-____________________________________________________________________________
-
-____________________________________________________________________________
-
 ---
 
 ## Answer Key — Teacher Copy
-
 1. B  
-2. A  
-3. B  
-4. A  
-5. A  
-6. Answers should mention retrieving relevant chunks before generating a grounded response.  
-7. Answers should cover extraction, chunking, embeddings, vector storage, retrieval, and generation.
 """
+        if "Flashcards" in prompt:
+            return """### 🃏 Study Flashcards
+* **Front:** RAG Architecture
+* **Back:** Retrieval-Augmented Generation pulls information from a database to ground AI responses.
+
+* **Front:** Socratic Method
+* **Back:** A teaching approach that guides students with hints rather than providing direct answers."""
+
         if "Exam" in prompt:
-            return """### 📝 Practice Exam (Generated via Neural Cache Fallback)
+            return """### 📝 Practice Exam
 1. What is the primary architecture used in this study module?
    - A) Monolithic
    - B) Retrieval-Augmented Generation (RAG) [Correct]
    - C) Static Tree
-   - D) Relational Only
-   *Explanation: Based on your active notes, the system utilizes vector embeddings and retrieval mechanisms.*
-
-2. Which component handles vector similarity search?
-   - A) ChromaDB [Correct]
-   - B) Local Storage
-   - C) HTTP Server
-   - D) RAM Cache"""
+   - D) Relational Only"""
         return "Based on your active study notes, this concept refers to core foundational principles outlined in your indexed documents."
 
 # --- MEDIA & DOCUMENT PIPELINE ---
@@ -414,7 +369,10 @@ def upload_study_files_modal():
                         with st.spinner(f"⚡ Processing {f.name}..."):
                             chunks = extract_pdf_chunks(io.BytesIO(f.read())) if ext in ['pdf', 'txt', 'docx', 'pptx'] else extract_media_chunks(f.read(), ext)
                             for i in range(0, len(chunks), 15): 
-                                st.session_state.vector_store.add_texts(chunks[i:i + 15])
+                                batch = chunks[i:i + 15]
+                                # NEW: Attach file source metadata for PRD compliance
+                                metadatas = [{"source": f.name} for _ in batch]
+                                st.session_state.vector_store.add_texts(batch, metadatas=metadatas)
                             st.session_state.processed_files.add(f.name)
                     except Exception as e:
                         st.warning(f"⚠️ Processed with cached fallback mode for {f.name}.")
@@ -432,8 +390,6 @@ col_menu, col_head1, col_head2 = st.columns([1.2, 6, 1])
 
 with col_menu:
     st.markdown("<div style='padding-top: 6px;'></div>", unsafe_allow_html=True)
-    # A bare :material/menu: label is Streamlit's documented chevron-free
-    # popover trigger. CSS above adds the visible "Menu" label only.
     with st.popover(":material/menu:", use_container_width=True, key="study_nav_menu"):
         st.markdown("### 🚀 StudyMate PRO")
         st.caption("Navigation Panel")
@@ -548,7 +504,10 @@ if nav_page == "🏠 Study Workspace & Chat":
                             
                         chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_text(transcript_text)
                         for i in range(0, len(chunks), 15):
-                            st.session_state.vector_store.add_texts(chunks[i:i + 15])
+                            batch = chunks[i:i + 15]
+                            # NEW: Attach metadata for live audio notes
+                            metadatas = [{"source": "Live Audio Lecture"} for _ in batch]
+                            st.session_state.vector_store.add_texts(batch, metadatas=metadatas)
                         
                         lecture_title = f"Lecture_Audio_Note_{int(time.time())}"
                         st.session_state.processed_files.add(lecture_title)
@@ -638,10 +597,23 @@ if nav_page == "🏠 Study Workspace & Chat":
                     try:
                         if 'retriever' in st.session_state:
                             docs = st.session_state['retriever'].invoke(chat_query)
-                            context = "\n\n".join([doc.page_content for doc in docs])
+                            # NEW: Prepending explicit source labels for citations
+                            context = "\n\n".join([f"[Source: {doc.metadata.get('source', 'Uploaded Notes')}]: {doc.page_content}" for doc in docs])
                             llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key)
-                            fallback_prompt = f"Use retrieved notes to answer professionally:\n{context}\n\nQuestion: {chat_query}"
-                            answer_text = safe_llm_invoke(llm, fallback_prompt)
+                            
+                            # NEW: PRD Compliant Socratic Prompt
+                            socratic_prompt = f"""You are an Aspire AI Socratic Tutor.
+                            RULES:
+                            1. Do NOT give the direct answer immediately. Give a hint or guide the student to the next logical step.
+                            2. If the answer cannot be found in the provided context, you MUST reply verbatim: "This context is not available in your provided materials."
+                            3. Always cite your sources using the [Source: ...] labels provided in the context.
+                            
+                            Context Notes:
+                            {context}
+                            
+                            Question: {chat_query}"""
+                            
+                            answer_text = safe_llm_invoke(llm, socratic_prompt)
                             st.markdown(answer_text)
                             st.session_state.messages.append({"role": "assistant", "content": answer_text})
                         else:
@@ -663,9 +635,23 @@ if nav_page == "🏠 Study Workspace & Chat":
                         try:
                             if 'retriever' in st.session_state:
                                 docs = st.session_state['retriever'].invoke(user_text)
-                                context = "\n\n".join([doc.page_content for doc in docs])
+                                # NEW: Prepending explicit source labels for citations
+                                context = "\n\n".join([f"[Source: {doc.metadata.get('source', 'Uploaded Notes')}]: {doc.page_content}" for doc in docs])
                                 llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", google_api_key=api_key)
-                                answer_text = safe_llm_invoke(llm, f"Answer based on notes:\n{context}\n\nQuestion: {user_text}")
+                                
+                                # NEW: PRD Compliant Socratic Prompt
+                                socratic_prompt = f"""You are an Aspire AI Socratic Tutor.
+                                RULES:
+                                1. Do NOT give the direct answer immediately. Give a hint or guide the student to the next logical step.
+                                2. If the answer cannot be found in the provided context, you MUST reply verbatim: "This context is not available in your provided materials."
+                                3. Always cite your sources using the [Source: ...] labels provided in the context.
+                                
+                                Context Notes:
+                                {context}
+                                
+                                Question: {user_text}"""
+                                
+                                answer_text = safe_llm_invoke(llm, socratic_prompt)
                                 st.markdown(answer_text)
                                 st.session_state.messages.append({"role": "assistant", "content": answer_text})
                             else:
@@ -750,13 +736,22 @@ elif nav_page == "📝 AI Exam Generator":
         q_count = st.selectbox("Number of Questions", [3, 5, 10, 20])
     with g2:
         diff = st.selectbox("Difficulty", ["Easy", "Medium", "Hard"])
+        # NEW: Added "Flashcards (Front/Back)" to the generator choices
         q_type = st.selectbox(
             "Question Type",
-            ["Multiple Choice (MCQ)", "Paper Exam (Printable)"]
+            ["Multiple Choice (MCQ)", "Paper Exam (Printable)", "Flashcards (Front/Back)"]
         )
 
     is_paper_exam = q_type == "Paper Exam (Printable)"
-    exam_button_label = "🖨️ Generate Printable Exam Paper" if is_paper_exam else "🚀 Generate Professional Exam"
+    is_flashcards = q_type == "Flashcards (Front/Back)"
+    
+    # Dynamic button label based on selection
+    if is_paper_exam:
+        exam_button_label = "🖨️ Generate Printable Exam Paper"
+    elif is_flashcards:
+        exam_button_label = "🃏 Generate Flashcards"
+    else:
+        exam_button_label = "🚀 Generate Professional Exam"
 
     if st.button(exam_button_label):
         with st.spinner("Compiling academic assessment..."):
@@ -767,12 +762,16 @@ elif nav_page == "📝 AI Exam Generator":
 
                 if is_paper_exam:
                     exam_prompt = f"""Create a PRINTABLE EXAM PAPER from the study notes below.
-
 Use {q_count} questions at {diff} difficulty. Include a formal title, blank Student Name,
 Roll Number, Date, Time Allowed, and Total Marks fields. Include clear instructions, numbered
 sections, marks for every question, writing space for short answers, and a separate Answer Key —
 Teacher Copy after a horizontal rule. Use a balanced mix of MCQs and short-answer questions.
-
+Study notes:
+{context}"""
+                elif is_flashcards:
+                    # NEW: Prompt specific for generating Flashcards
+                    exam_prompt = f"""Generate {q_count} {diff} level study flashcards based on the notes below. 
+Format as a clean markdown list with 'Front: [Term/Question]' and 'Back: [Definition/Explanation]'.
 Study notes:
 {context}"""
                 else:
@@ -781,12 +780,19 @@ Study notes:
                 st.session_state.last_exam_output = safe_llm_invoke(llm, exam_prompt)
                 st.session_state.last_exam_is_paper = is_paper_exam
             except Exception as e:
-                fallback_prompt = "PRINTABLE EXAM PAPER" if is_paper_exam else "Exam"
+                # Fallback logic depending on type
+                if is_paper_exam:
+                    fallback_prompt = "PRINTABLE EXAM PAPER"
+                elif is_flashcards:
+                    fallback_prompt = "Flashcards"
+                else:
+                    fallback_prompt = "Exam"
+                    
                 st.session_state.last_exam_output = safe_llm_invoke(None, fallback_prompt)
                 st.session_state.last_exam_is_paper = is_paper_exam
 
     if st.session_state.last_exam_output:
-        output_title = "🖨️ Printable Exam Paper" if st.session_state.last_exam_is_paper else "📝 Exam Output"
+        output_title = "🖨️ Printable Exam Paper" if st.session_state.last_exam_is_paper else ("🃏 Study Flashcards" if is_flashcards else "📝 Exam Output")
         st.markdown(f"### {output_title}")
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.markdown(st.session_state.last_exam_output)
